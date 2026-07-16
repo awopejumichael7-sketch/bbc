@@ -29,12 +29,12 @@ import {
 
 // ---- REPLACE WITH YOUR OWN FIREBASE PROJECT CONFIG ------------------------
 const firebaseConfig = {
-  apiKey: "YOUR_API_KEY",
-  authDomain: "YOUR_PROJECT.firebaseapp.com",
-  projectId: "YOUR_PROJECT_ID",
-  storageBucket: "YOUR_PROJECT.appspot.com",
-  messagingSenderId: "YOUR_SENDER_ID",
-  appId: "YOUR_APP_ID"
+  apiKey: "AIzaSyCjnth5WlncQX_LPCWN8IafIBa3a_Saq6o",
+  authDomain: "gwabbc-b8bab.firebaseapp.com",
+  projectId: "gwabbc-b8bab",
+  storageBucket: "gwabbc-b8bab.firebasestorage.app",
+  messagingSenderId: "382959481552",
+  appId: "1:382959481552:web:a0041eeb739a5b4935a4d5"
 };
 // -----------------------------------------------------------------------
 
