@@ -80,7 +80,31 @@ async function renderOverview() {
   document.getElementById("qa-announce").onclick = () => document.querySelector('[data-view="announcements"]').click();
 }
 
-/* ============================== TEACHERS ============================== */
+/* ---------- Persistent credentials modal (doesn't auto-dismiss like a toast) ---------- */
+function showCredentialsModal(role, name, id, passcode) {
+  const old = document.getElementById("creds-modal-backdrop");
+  if (old) old.remove();
+  const backdrop = document.createElement("div");
+  backdrop.id = "creds-modal-backdrop";
+  backdrop.style.cssText = "position:fixed;inset:0;background:rgba(11,37,69,.75);z-index:900;display:flex;align-items:center;justify-content:center;padding:20px;";
+  backdrop.innerHTML = `
+    <div class="glass-card" style="max-width:440px;width:100%;background:#fff;">
+      <h4><i class="fa-solid fa-circle-check" style="color:var(--success);"></i> ${role} Created</h4>
+      <p style="color:var(--muted);">Save or share these login details with <strong>${name}</strong> now — this passcode cannot be shown again after you close this box.</p>
+      <div class="form-field"><label>Login ID</label><input readonly value="${id}" id="cred-id"></div>
+      <div class="form-field"><label>Passcode</label><input readonly value="${passcode}" id="cred-pass"></div>
+      <button class="btn-gold" id="cred-copy"><i class="fa-solid fa-copy"></i> Copy Both</button>
+      <button class="btn-outline" id="cred-close">I've Saved This — Close</button>
+    </div>`;
+  document.body.appendChild(backdrop);
+  document.getElementById("cred-copy").onclick = async () => {
+    await navigator.clipboard.writeText(`Login ID: ${id}\nPasscode: ${passcode}`);
+    toast("Copied to clipboard", "success");
+  };
+  document.getElementById("cred-close").onclick = () => backdrop.remove();
+}
+
+
 async function renderTeachers() {
   main.innerHTML = `<div class="skeleton" style="height:220px;"></div>`;
   const coursesSnap = await getDocs(collection(db, COL.courses));
@@ -116,7 +140,7 @@ async function renderTeachers() {
       await updateDoc(doc(db, COL.courses, courseId), { teacherId: cred.user.uid });
       await signOutSecondary(sAuth);
       await logActivity(user.uid, "admin", "create_teacher", teacherId);
-      toast(`Teacher created! ID: ${teacherId}  Passcode: ${passcode} (share securely)`, "success");
+      showCredentialsModal("Teacher", name, teacherId, passcode);
       e.target.reset();
       loadTeacherTable();
     } catch (err) { console.error(err); toast(err.message, "error"); }
@@ -187,7 +211,7 @@ async function renderStudents() {
       });
       await signOutSecondary(sAuth);
       await logActivity(user.uid, "admin", "create_student", studentId);
-      toast(`Student created! ID: ${studentId}  Passcode: ${passcode} (share securely)`, "success");
+      showCredentialsModal("Student", name, studentId, passcode);
       e.target.reset();
       loadStudentTable();
     } catch (err) { console.error(err); toast(err.message, "error"); }
