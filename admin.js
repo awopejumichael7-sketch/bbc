@@ -104,6 +104,45 @@ function showCredentialsModal(role, name, id, passcode) {
   document.getElementById("cred-close").onclick = () => backdrop.remove();
 }
 
+/* ---------- Reset Login: issues a brand-new ID + passcode (see chat explanation
+   for why an in-place password change isn't possible on the free client-only
+   Firebase plan) ---------- */
+async function resetCredentials(role, oldDocId, refreshFn) {
+  const col = role === "teacher" ? COL.teachers : COL.students;
+  const idField = role === "teacher" ? "teacherId" : "studentId";
+  const prefix = role === "teacher" ? "TCH" : "STU";
+
+  if (!confirm(`Reset this ${role}'s login? They will receive a brand-new ID and passcode — their old ID will stop working. Their name, email, course, and history stay linked to their profile.`)) return;
+
+  const oldSnap = await getDoc(doc(db, col, oldDocId));
+  if (!oldSnap.exists()) { toast("Record not found.", "error"); return; }
+  const oldData = oldSnap.data();
+
+  const newId = generateId(prefix);
+  const newPasscode = generatePasscode();
+
+  try {
+    const sAuth = secondaryAuth();
+    const cred = await createUserWithEmailAndPassword(sAuth, `${newId.toLowerCase()}@cacgw.app`, newPasscode);
+    await setDoc(doc(db, col, cred.user.uid), {
+      ...oldData,
+      [idField]: newId,
+      createdAt: oldData.createdAt || serverTimestamp()
+    });
+    if (role === "teacher" && oldData.courseId) {
+      await updateDoc(doc(db, COL.courses, oldData.courseId), { teacherId: cred.user.uid });
+    }
+    await deleteDoc(doc(db, col, oldDocId)); // old login profile removed so old ID/passcode can no longer sign in
+    await signOutSecondary(sAuth);
+    await logActivity(user.uid, "admin", "reset_" + role, `${oldData[idField]} -> ${newId}`);
+    showCredentialsModal(role === "teacher" ? "Teacher" : "Student", oldData.fullName, newId, newPasscode);
+    if (refreshFn) refreshFn();
+  } catch (err) {
+    console.error(err);
+    toast(err.message, "error");
+  }
+}
+
 
 async function renderTeachers() {
   main.innerHTML = `<div class="skeleton" style="height:220px;"></div>`;
@@ -161,6 +200,7 @@ async function loadTeacherTable() {
       <td><span class="badge ${t.active === false ? "inactive" : "active"}">${t.active === false ? "Inactive" : "Active"}</span></td>
       <td>
         <button class="btn-outline" data-act="toggle" data-id="${d.id}" data-state="${t.active}">${t.active === false ? "Activate" : "Deactivate"}</button>
+        <button class="btn-navy" data-act="reset" data-id="${d.id}"><i class="fa-solid fa-key"></i> Reset Login</button>
         <button class="btn-danger" data-act="delete" data-id="${d.id}">Delete</button>
       </td></tr>`;
   });
@@ -169,6 +209,7 @@ async function loadTeacherTable() {
     await updateDoc(doc(db, COL.teachers, b.dataset.id), { active: !(b.dataset.state === "true") });
     toast("Status updated", "success"); loadTeacherTable();
   });
+  wrap.querySelectorAll("[data-act=reset]").forEach(b => b.onclick = () => resetCredentials("teacher", b.dataset.id, loadTeacherTable));
   wrap.querySelectorAll("[data-act=delete]").forEach(b => b.onclick = async () => {
     if (!confirm("Delete this teacher record? (Auth account must be removed separately in Firebase console)")) return;
     await deleteDoc(doc(db, COL.teachers, b.dataset.id));
@@ -232,6 +273,7 @@ async function loadStudentTable() {
       <td><span class="badge ${s.active === false ? "inactive" : "active"}">${s.active === false ? "Inactive" : "Active"}</span></td>
       <td>
         <button class="btn-outline" data-act="toggle" data-id="${d.id}" data-state="${s.active}">${s.active === false ? "Activate" : "Deactivate"}</button>
+        <button class="btn-navy" data-act="reset" data-id="${d.id}"><i class="fa-solid fa-key"></i> Reset Login</button>
         <button class="btn-danger" data-act="delete" data-id="${d.id}">Delete</button>
       </td></tr>`;
   });
@@ -240,6 +282,7 @@ async function loadStudentTable() {
     await updateDoc(doc(db, COL.students, b.dataset.id), { active: !(b.dataset.state === "true") });
     toast("Status updated", "success"); loadStudentTable();
   });
+  wrap.querySelectorAll("[data-act=reset]").forEach(b => b.onclick = () => resetCredentials("student", b.dataset.id, loadStudentTable));
   wrap.querySelectorAll("[data-act=delete]").forEach(b => b.onclick = async () => {
     if (!confirm("Delete this student record?")) return;
     await deleteDoc(doc(db, COL.students, b.dataset.id));
