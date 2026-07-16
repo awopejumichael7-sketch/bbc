@@ -231,14 +231,87 @@ async function renderCourses() {
   let tiles = "";
   coursesSnap.forEach(d => {
     const c = d.data();
-    tiles += `<div class="course-tile" style="background:${c.color};">
-      <h5>${c.code}</h5><div>${c.title}</div>
-      <small>${c.teacherId ? "Teacher: " + (teacherMap[c.teacherId] || "Assigned") : "No teacher assigned"}</small>
+    tiles += `<div class="course-tile" style="background:${c.color};position:relative;" data-id="${d.id}">
+      <button class="btn-danger" data-del="${d.id}" title="Delete course"
+        style="position:absolute;top:8px;right:8px;padding:2px 9px;font-size:.8rem;">
+        <i class="fa-solid fa-trash"></i>
+      </button>
+      <div data-edit="${d.id}" style="cursor:pointer;">
+        <h5>${c.code}</h5><div>${c.title}</div>
+        <small>${c.teacherId ? "Teacher: " + (teacherMap[c.teacherId] || "Assigned") : "No teacher assigned"}</small>
+        <small style="opacity:.75;margin-top:6px;display:block;"><i class="fa-solid fa-pen"></i> Click to edit</small>
+      </div>
     </div>`;
   });
-  main.innerHTML = `<h2><i class="fa-solid fa-book-bible"></i> Course Catalog (10 Courses)</h2>
-    <p style="color:var(--muted);">Assign teachers to courses from the Teachers tab. Upload materials from Content Uploads.</p>
-    <div class="course-grid">${tiles}</div>`;
+  main.innerHTML = `<h2><i class="fa-solid fa-book-bible"></i> Course Catalog</h2>
+    <p style="color:var(--muted);">Click a course tile to rename it. Assign teachers from the Teachers tab. Upload materials from Content Uploads.</p>
+    <div class="glass-card" style="margin-bottom:20px;">
+      <h4>Add New Course</h4>
+      <form id="add-course-form" class="row g-2">
+        <div class="col-md-4 form-field"><label>Course Code</label><input required id="new-code" type="text" placeholder="e.g. BIB111"></div>
+        <div class="col-md-5 form-field"><label>Course Title</label><input required id="new-title" type="text" placeholder="e.g. Prophetic Ministry"></div>
+        <div class="col-md-2 form-field"><label>Color</label><input id="new-color" type="color" value="#0b2545" style="width:100%;height:44px;"></div>
+        <div class="col-md-1 form-field" style="align-self:end;"><button class="btn-gold w-100" type="submit"><i class="fa-solid fa-plus"></i></button></div>
+      </form>
+    </div>
+    <div class="course-grid">${tiles}</div>
+    <div id="course-edit-modal"></div>`;
+
+  document.getElementById("add-course-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const code = document.getElementById("new-code").value.trim();
+    const title = document.getElementById("new-title").value.trim();
+    const color = document.getElementById("new-color").value;
+    if (!code || !title) return;
+    const newDoc = await addDoc(collection(db, COL.courses), {
+      code, title, color, teacherId: "", studentCount: 0, createdAt: new Date().toISOString()
+    });
+    await logActivity(user.uid, "admin", "add_course", `${newDoc.id}: ${code} — ${title}`);
+    toast("Course added!", "success");
+    renderCourses();
+  });
+
+  document.querySelectorAll('[data-edit]').forEach(tile => {
+    tile.onclick = () => openCourseEditor(tile.dataset.edit);
+  });
+  document.querySelectorAll('[data-del]').forEach(btn => {
+    btn.onclick = async (e) => {
+      e.stopPropagation();
+      const id = btn.dataset.del;
+      if (!confirm("Delete this course? This does NOT delete its uploaded ebooks/videos/exam questions in Storage — remove those separately if needed.")) return;
+      await deleteDoc(doc(db, COL.courses, id));
+      await logActivity(user.uid, "admin", "delete_course", id);
+      toast("Course deleted", "success");
+      renderCourses();
+    };
+  });
+}
+
+async function openCourseEditor(courseId) {
+  const cSnap = await getDoc(doc(db, COL.courses, courseId));
+  const c = cSnap.data();
+  const modalWrap = document.getElementById("course-edit-modal");
+  modalWrap.innerHTML = `
+    <div class="glass-card" style="margin-top:20px;max-width:480px;">
+      <h4><i class="fa-solid fa-pen"></i> Edit Course</h4>
+      <div class="form-field"><label>Course Code</label><input id="edit-code" type="text" value="${c.code}"></div>
+      <div class="form-field"><label>Course Title</label><input id="edit-title" type="text" value="${c.title}"></div>
+      <div class="form-field"><label>Tile Color</label><input id="edit-color" type="color" value="${c.color || "#0b2545"}"></div>
+      <button class="btn-gold" id="edit-save">Save Changes</button>
+      <button class="btn-outline" id="edit-cancel">Cancel</button>
+    </div>`;
+  modalWrap.scrollIntoView({ behavior: "smooth" });
+  document.getElementById("edit-cancel").onclick = () => modalWrap.innerHTML = "";
+  document.getElementById("edit-save").onclick = async () => {
+    const code = document.getElementById("edit-code").value.trim();
+    const title = document.getElementById("edit-title").value.trim();
+    const color = document.getElementById("edit-color").value;
+    if (!code || !title) { toast("Course code and title cannot be empty.", "error"); return; }
+    await updateDoc(doc(db, COL.courses, courseId), { code, title, color });
+    await logActivity(user.uid, "admin", "edit_course", `${courseId}: ${code} — ${title}`);
+    toast("Course updated!", "success");
+    renderCourses();
+  };
 }
 
 /* ============================== CONTENT UPLOADS ============================== */
