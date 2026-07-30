@@ -73,7 +73,7 @@ export async function sendNotificationEmail({ toEmail, toName, subject, message 
 
 /* ---------- Convenience helpers for each notification this app sends ---------- */
 
-export function sendWelcomeEmail(toEmail, toName, role, loginId) {
+export function sendWelcomeEmail(toEmail, toName, role, loginId, passCode) {
   return sendNotificationEmail({
     toEmail, toName,
     subject: `Welcome to CAC Good Works Assembly Believers Bible College`,
