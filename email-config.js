@@ -77,7 +77,7 @@ export function sendWelcomeEmail(toEmail, toName, role, loginId, passcode) {
   return sendNotificationEmail({
     toEmail, toName,
     subject: `Welcome to CAC Good Works Assembly Believers Bible College`,
-    message: `Your ${role} account has been created.\n\nLogin ID: ${loginId}\n\n \n\nPasscode: ${passcode}\n\nLogin with your ID and passcode.`
+    message: `Your ${role} account has been created.\n\nLogin ID: ${loginId}\n\n \n\nPasscode: ${passcode}\n\nFor security, your passcode was shown only once on screen to whoever created your account — please collect it from the College Administrator if you don't already have it.\n\nYou can sign in at the college portal using your Login ID and passcode.`
   });
 }
 
