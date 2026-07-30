@@ -73,11 +73,11 @@ export async function sendNotificationEmail({ toEmail, toName, subject, message 
 
 /* ---------- Convenience helpers for each notification this app sends ---------- */
 
-export function sendWelcomeEmail(toEmail, toName, role, loginId, passCode) {
+export function sendWelcomeEmail(toEmail, toName, role, loginId, passcode) {
   return sendNotificationEmail({
     toEmail, toName,
     subject: `Welcome to CAC Good Works Assembly Believers Bible College`,
-    message: `Your ${role} account has been created.\n\nLogin ID: ${loginId}\n\n \n\nPasscode: ${passCode}\n\nLogin with your ID and passcode.`
+    message: `Your ${role} account has been created.\n\nLogin ID: ${loginId}\n\n \n\nPasscode: ${passcode}\n\nLogin with your ID and passcode.`
   });
 }
 
