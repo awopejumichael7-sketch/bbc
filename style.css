@@ -187,6 +187,11 @@ mark.hl{background:var(--gold-light);padding:1px 2px;border-radius:3px;}
 .skeleton{background:linear-gradient(90deg,#e5e9f2 25%,#f3f5fa 37%,#e5e9f2 63%);background-size:400% 100%;animation:sk 1.4s ease infinite;border-radius:8px;}
 @keyframes sk{0%{background-position:100% 50%;}100%{background-position:0 50%;}}
 
+/* ---------- Consistent empty / error state ---------- */
+.empty-state{text-align:center;padding:32px 20px;color:var(--muted);}
+.empty-state i{font-size:1.8rem;margin-bottom:10px;display:block;opacity:.6;}
+.empty-state p{margin:0 0 10px;}
+
 /* ---------- Responsive ---------- */
 @media(max-width:860px){
   .dash-layout{flex-direction:column;}

@@ -104,3 +104,86 @@ export function protectElement(el) {
 
 /* ---------- Small helper: log out redirect ---------- */
 export function goTo(path) { window.location.href = path; }
+
+/* ==========================================================================
+   SESSION TIMEOUT — logs a user out automatically after prolonged inactivity,
+   with a warning first. Used on the Admin/Teacher/Student dashboards only —
+   deliberately NOT used during exams, which already have their own
+   fullscreen/timer safeguards and shouldn't risk kicking a student out
+   mid-answer.
+   ========================================================================== */
+export function initSessionTimeout(logoutFn, warningMinutes = 25, graceMinutes = 5, isPausedFn = () => false) {
+  const warningMs = warningMinutes * 60 * 1000;
+  const graceMs = graceMinutes * 60 * 1000;
+  let warnTimer, logoutTimer, countdownInterval;
+
+  function clearAll() {
+    clearTimeout(warnTimer); clearTimeout(logoutTimer); clearInterval(countdownInterval);
+    const overlay = document.getElementById("session-timeout-overlay");
+    if (overlay) overlay.remove();
+  }
+
+  function showWarning() {
+    if (isPausedFn()) { resetTimers(); return; } // e.g. teacher is mid-broadcast — don't interrupt
+    if (document.getElementById("session-timeout-overlay")) return;
+    let secondsLeft = Math.floor(graceMs / 1000);
+    const overlay = document.createElement("div");
+    overlay.id = "session-timeout-overlay";
+    overlay.style.cssText = "position:fixed;inset:0;background:rgba(11,37,69,.75);z-index:950;display:flex;align-items:center;justify-content:center;padding:20px;";
+    overlay.innerHTML = `
+      <div class="glass-card" style="max-width:420px;width:100%;background:#fff;text-align:center;">
+        <i class="fa-solid fa-clock" style="font-size:2rem;color:var(--gold);"></i>
+        <h4 style="margin-top:10px;">Still there?</h4>
+        <p style="color:var(--muted);">You've been inactive for a while. For your security, you'll be signed out in <strong id="session-countdown">${secondsLeft}</strong> seconds.</p>
+        <button class="btn-gold" id="session-stay-btn">I'm still here</button>
+      </div>`;
+    document.body.appendChild(overlay);
+    document.getElementById("session-stay-btn").onclick = resetTimers;
+
+    countdownInterval = setInterval(() => {
+      secondsLeft--;
+      const el = document.getElementById("session-countdown");
+      if (el) el.textContent = secondsLeft;
+      if (secondsLeft <= 0) clearInterval(countdownInterval);
+    }, 1000);
+
+    logoutTimer = setTimeout(() => { clearAll(); logoutFn(); }, graceMs);
+  }
+
+  function resetTimers() {
+    clearAll();
+    warnTimer = setTimeout(showWarning, warningMs);
+  }
+
+  ["mousemove", "mousedown", "keydown", "touchstart", "scroll"].forEach(evt =>
+    document.addEventListener(evt, resetTimers, { passive: true })
+  );
+  resetTimers();
+}
+
+/* ==========================================================================
+   EMPTY / LOADING STATE HELPERS — one consistent look across every dashboard
+   list, instead of ad-hoc "Loading…" / "Nothing yet." text.
+   ========================================================================== */
+export function loadingStateHTML(label = "Loading…") {
+  return `<div style="text-align:center;padding:24px;color:var(--muted);">
+      <i class="fa-solid fa-circle-notch fa-spin" style="font-size:1.4rem;margin-bottom:8px;display:block;"></i>${label}
+    </div>`;
+}
+
+export function emptyStateHTML(icon, message) {
+  return `<div class="empty-state">
+      <i class="fa-solid fa-${icon}"></i>
+      <p>${message}</p>
+    </div>`;
+}
+
+export function errorStateHTML(message, retryFn) {
+  const id = "err-retry-" + Math.random().toString(36).slice(2, 8);
+  setTimeout(() => { const b = document.getElementById(id); if (b && retryFn) b.onclick = retryFn; }, 0);
+  return `<div class="empty-state" style="color:var(--danger);">
+      <i class="fa-solid fa-triangle-exclamation"></i>
+      <p>${message}</p>
+      ${retryFn ? `<button class="btn-outline" id="${id}">Retry</button>` : ""}
+    </div>`;
+}

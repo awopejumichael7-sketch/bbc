@@ -7,8 +7,9 @@ import {
   query, where, orderBy, serverTimestamp, onSnapshot, ref, uploadBytesResumable, getDownloadURL,
   logActivity
 } from "./firebase-config.js";
-import { toast, initTheme, toggleTheme, registerServiceWorker } from "./app-shell.js";
+import { toast, initTheme, toggleTheme, registerServiceWorker, initSessionTimeout, emptyStateHTML, errorStateHTML } from "./app-shell.js";
 import { openDrivePicker, makeFilePublic, verifyPublicAccess, driveFileViewUrl, uploadFileToDrive, loadGoogleScripts } from "./drive-config.js";
+import { sendResultEmail } from "./email-config.js";
 
 initTheme();
 registerServiceWorker();
@@ -34,6 +35,7 @@ guardRoute("teacher").then(async (u) => {
 
   bindSidebar();
   renderOverview();
+  initSessionTimeout(logout, 25, 5, () => !!liveStream || !!mediaRecorder || !!isLiveRecording);
 });
 
 function bindSidebar() {
@@ -239,7 +241,7 @@ async function loadMaterialsList() {
     document.getElementById("ml-retry").onclick = loadMaterialsList;
     return;
   }
-  if (snap.empty) { wrap.innerHTML = "<p>Nothing uploaded here yet for this type.</p>"; return; }
+  if (snap.empty) { wrap.innerHTML = emptyStateHTML("cloud-arrow-up", "Nothing uploaded here yet for this type."); return; }
   let rows = "";
   snap.forEach(d => {
     const item = d.data();
@@ -621,7 +623,7 @@ async function renderAttendance() {
   const snap = await getDocs(query(collection(db, COL.attendance), where("courseId", "==", course.id)));
   let rows = "";
   snap.forEach(d => { const a = d.data(); rows += `<tr><td>${a.studentId}</td><td>${a.date}</td><td>${a.time}</td><td>${a.duration || "—"}</td></tr>`; });
-  document.getElementById("att-list").innerHTML = snap.empty ? "<p>No attendance records yet.</p>" : `<table class="data-table"><thead><tr><th>Student</th><th>Date</th><th>Time</th><th>Duration</th></tr></thead><tbody>${rows}</tbody></table>`;
+  document.getElementById("att-list").innerHTML = snap.empty ? emptyStateHTML("clipboard-check", "No attendance records yet.") : `<table class="data-table"><thead><tr><th>Student</th><th>Date</th><th>Time</th><th>Duration</th></tr></thead><tbody>${rows}</tbody></table>`;
 }
 
 /* ---------- Student Questions ---------- */
@@ -632,7 +634,7 @@ async function renderQuestions() {
   bindCourseSwitcher();
   const snap = await getDocs(query(collection(db, COL.questions), where("courseId", "==", course.id)));
   const wrap = document.getElementById("q-list");
-  if (snap.empty) { wrap.innerHTML = "<p>No questions yet.</p>"; return; }
+  if (snap.empty) { wrap.innerHTML = emptyStateHTML("comments", "No questions yet."); return; }
   wrap.innerHTML = "";
   snap.forEach(d => {
     const q = d.data();
@@ -663,7 +665,7 @@ async function renderFeedback() {
   const snap = await getDocs(query(collection(db, COL.feedback), where("courseId", "==", course.id)));
   let rows = "";
   snap.forEach(d => { const f = d.data(); rows += `<tr><td>${f.rating || "—"}★</td><td>${f.comment || ""}</td></tr>`; });
-  document.getElementById("fb-list").innerHTML = snap.empty ? "<p>No feedback yet.</p>" : `<table class="data-table"><thead><tr><th>Rating</th><th>Comment</th></tr></thead><tbody>${rows}</tbody></table>`;
+  document.getElementById("fb-list").innerHTML = snap.empty ? emptyStateHTML("star", "No feedback yet.") : `<table class="data-table"><thead><tr><th>Rating</th><th>Comment</th></tr></thead><tbody>${rows}</tbody></table>`;
 }
 
 /* ============================== EXAM QUESTIONS (teacher, own course only) ============================== */
@@ -725,7 +727,7 @@ async function renderExamQuestions() {
 async function loadTeacherExamList() {
   const wrap = document.getElementById("teq-list");
   const snap = await getDocs(query(collection(db, COL.examQuestions), where("courseId", "==", course.id)));
-  if (snap.empty) { wrap.innerHTML = "<p>No exam questions yet for this course.</p>"; return; }
+  if (snap.empty) { wrap.innerHTML = emptyStateHTML("file-pen", "No exam questions yet for this course — add one above."); return; }
   let rows = "";
   snap.forEach(d => {
     const q = d.data();
@@ -767,7 +769,7 @@ async function renderProgress() {
     resultsSnap.forEach(d => { const r = d.data(); resultMap[r.studentUid] = r; });
 
     const studentIds = Object.keys(studentMap);
-    if (!studentIds.length) { wrap.innerHTML = "<p>No students enrolled in this course yet.</p>"; return; }
+    if (!studentIds.length) { wrap.innerHTML = emptyStateHTML("user-graduate", "No students enrolled in this course yet."); return; }
 
     let rows = "";
     studentIds.forEach(uid => {
@@ -784,7 +786,7 @@ async function renderProgress() {
     });
     wrap.innerHTML = `<table class="data-table"><thead><tr><th>Student ID</th><th>Name</th><th>Attendance</th><th>Exam Result</th><th>Certificate</th></tr></thead><tbody>${rows}</tbody></table>`;
   } catch (err) {
-    wrap.innerHTML = `<p style="color:var(--danger);">Could not load progress: ${err.message}</p>`;
+    wrap.innerHTML = errorStateHTML(`Could not load progress: ${err.message}`, renderProgress);
   }
 }
 
@@ -806,13 +808,13 @@ async function renderGrading() {
   try {
     snap = await getDocs(query(collection(db, COL.results), where("courseId", "==", course.id)));
   } catch (err) {
-    wrap.innerHTML = `<p style="color:var(--danger);">Could not load results: ${err.message}</p>`;
+    wrap.innerHTML = errorStateHTML(`Could not load results: ${err.message}`, renderGrading);
     return;
   }
   const withTheory = [];
   snap.forEach(d => { const r = d.data(); if (r.theoryAnswers && r.theoryAnswers.length) withTheory.push({ id: d.id, ...r }); });
 
-  if (!withTheory.length) { wrap.innerHTML = "<p>No theory answers to grade yet for this course.</p>"; return; }
+  if (!withTheory.length) { wrap.innerHTML = emptyStateHTML("marker", "No theory answers to grade yet for this course."); return; }
 
   wrap.innerHTML = "";
   withTheory.forEach((r) => renderGradingCard(r, wrap));
@@ -908,6 +910,14 @@ function renderGradingCard(r, wrap) {
     });
     await logActivity(user.uid, "teacher", "grade_theory", `${r.studentId} - ${course.id}`);
     toast("Grades saved", "success");
+
+    // Best-effort notification — never blocks the grade save itself
+    try {
+      const sSnap = await getDoc(doc(db, COL.students, r.studentUid));
+      const s = sSnap.data();
+      if (s?.email) await sendResultEmail(s.email, s.fullName, course.title, combinedScore, combinedTotal, percent, grade);
+    } catch (err) { /* email is a nice-to-have, not critical */ }
+
     renderGrading();
   };
 }

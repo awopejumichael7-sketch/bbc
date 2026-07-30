@@ -10,8 +10,9 @@ import {
   generateId, generatePasscode, logActivity
 } from "./firebase-config.js";
 import { DEFAULT_COURSES, seedCourses } from "./courses-data.js";
-import { toast, initTheme, toggleTheme, registerServiceWorker } from "./app-shell.js";
+import { toast, initTheme, toggleTheme, registerServiceWorker, initSessionTimeout, emptyStateHTML, errorStateHTML } from "./app-shell.js";
 import { openDrivePicker, makeFilePublic, verifyPublicAccess, driveFileViewUrl, loadGoogleScripts } from "./drive-config.js";
+import { sendWelcomeEmail, sendAnnouncementEmail } from "./email-config.js";
 import { initializeApp, getApps } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { getAuth as getAuthSecondary, createUserWithEmailAndPassword, signOut as signOutSecondary } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 
@@ -26,6 +27,7 @@ document.getElementById("logout-btn").onclick = logout;
 guardRoute("admin").then(async (u) => {
   user = u;
   await seedCourses(db, collection, doc, setDoc, getDocs, COL);
+  initSessionTimeout(logout);
   bindSidebar();
   renderOverview();
 });
@@ -200,6 +202,7 @@ async function renderTeachers() {
       await signOutSecondary(sAuth);
       await logActivity(user.uid, "admin", "create_teacher", teacherId);
       showCredentialsModal("Teacher", name, teacherId, passcode);
+      sendWelcomeEmail(email, name, "teacher", teacherId).catch(() => {}); // best-effort; never blocks account creation
       e.target.reset();
       loadTeacherTable();
     } catch (err) { console.error(err); toast(err.message, "error"); }
@@ -211,7 +214,7 @@ async function renderTeachers() {
 async function loadTeacherTable() {
   const wrap = document.getElementById("teacher-table-wrap");
   const [snap, coursesSnap] = await Promise.all([getDocs(collection(db, COL.teachers)), getDocs(collection(db, COL.courses))]);
-  if (snap.empty) { wrap.innerHTML = "<p>No teachers yet.</p>"; return; }
+  if (snap.empty) { wrap.innerHTML = emptyStateHTML("chalkboard-user", "No teachers yet — create one above to get started."); return; }
   const courseMap = {}; coursesSnap.forEach(d => courseMap[d.id] = d.data().code);
   let rows = "";
   snap.forEach(d => {
@@ -297,6 +300,7 @@ async function renderStudents() {
       await signOutSecondary(sAuth);
       await logActivity(user.uid, "admin", "create_student", studentId);
       showCredentialsModal("Student", name, studentId, passcode);
+      sendWelcomeEmail(email, name, "student", studentId).catch(() => {}); // best-effort; never blocks account creation
       e.target.reset();
       loadStudentTable();
     } catch (err) { console.error(err); toast(err.message, "error"); }
@@ -308,7 +312,7 @@ async function renderStudents() {
 async function loadStudentTable() {
   const wrap = document.getElementById("student-table-wrap");
   const [snap, coursesSnap] = await Promise.all([getDocs(collection(db, COL.students)), getDocs(collection(db, COL.courses))]);
-  if (snap.empty) { wrap.innerHTML = "<p>No students yet.</p>"; return; }
+  if (snap.empty) { wrap.innerHTML = emptyStateHTML("user-graduate", "No students yet — create one above to get started."); return; }
   const courseMap = {}; coursesSnap.forEach(d => courseMap[d.id] = d.data().code);
   let rows = "";
   snap.forEach(d => {
@@ -716,7 +720,7 @@ async function loadContentList() {
     document.getElementById("cl-retry").onclick = loadContentList;
     return;
   }
-  if (snap.empty) { wrap.innerHTML = "<p>Nothing uploaded here yet for this course/type.</p>"; return; }
+  if (snap.empty) { wrap.innerHTML = emptyStateHTML("cloud-arrow-up", "Nothing uploaded here yet for this course/type."); return; }
   let rows = "";
   snap.forEach(d => {
     const item = d.data();
@@ -798,7 +802,7 @@ async function renderExams() {
 async function loadExamList() {
   const wrap = document.getElementById("exam-list");
   const snap = await getDocs(collection(db, COL.examQuestions));
-  if (snap.empty) { wrap.innerHTML = "<p>No exam questions yet.</p>"; return; }
+  if (snap.empty) { wrap.innerHTML = emptyStateHTML("file-pen", "No exam questions yet — add one above."); return; }
   let rows = "";
   snap.forEach(d => {
     const q = d.data();
@@ -819,20 +823,45 @@ async function renderAnnouncements() {
       <form id="ann-form">
         <div class="form-field"><label>Title</label><input required id="a-title" type="text"></div>
         <div class="form-field"><label>Message</label><textarea required id="a-message" rows="3"></textarea></div>
+        <div class="form-field">
+          <label><input type="checkbox" id="a-email"> Also email this to every Student and Teacher with an email on file</label>
+          <small style="color:var(--muted);display:block;margin-top:4px;">
+            <i class="fa-solid fa-circle-info"></i> Sends one email per person via your free EmailJS account (200/month limit on the free plan) — leave this unchecked for routine announcements and use it for things that really need everyone's attention.
+          </small>
+        </div>
         <button class="btn-gold" type="submit"><i class="fa-solid fa-paper-plane"></i> Publish to Everyone</button>
       </form>
+      <div id="ann-email-status" style="margin-top:10px;color:var(--muted);"></div>
     </div>
     <div class="glass-card" style="margin-top:20px;"><div id="ann-list">Loading…</div></div>`;
   document.getElementById("ann-form").addEventListener("submit", async (e) => {
     e.preventDefault();
-    await addDoc(collection(db, COL.notifications), {
-      title: document.getElementById("a-title").value,
-      body: document.getElementById("a-message").value,
-      audience: "all", createdAt: serverTimestamp()
-    });
+    const title = document.getElementById("a-title").value;
+    const body = document.getElementById("a-message").value;
+    const alsoEmail = document.getElementById("a-email").checked;
+    await addDoc(collection(db, COL.notifications), { title, body, audience: "all", createdAt: serverTimestamp() });
     toast("Announcement published", "success");
     e.target.reset();
     loadAnnouncements();
+
+    if (alsoEmail) {
+      const statusEl = document.getElementById("ann-email-status");
+      statusEl.textContent = "Sending emails…";
+      try {
+        const [studentsSnap, teachersSnap] = await Promise.all([getDocs(collection(db, COL.students)), getDocs(collection(db, COL.teachers))]);
+        const recipients = [];
+        studentsSnap.forEach(d => { const s = d.data(); if (s.email) recipients.push({ email: s.email, name: s.fullName }); });
+        teachersSnap.forEach(d => { const t = d.data(); if (t.email) recipients.push({ email: t.email, name: t.fullName }); });
+        let sent = 0;
+        for (const r of recipients) {
+          try { await sendAnnouncementEmail(r.email, r.name, title, body); sent++; } catch (err) { /* keep going */ }
+        }
+        statusEl.textContent = `Emailed ${sent} of ${recipients.length} people.`;
+        await logActivity(user.uid, "admin", "email_announcement", `${title} — ${sent}/${recipients.length}`);
+      } catch (err) {
+        statusEl.textContent = `Could not send emails: ${err.message}`;
+      }
+    }
   });
   loadAnnouncements();
 }
@@ -841,7 +870,7 @@ async function loadAnnouncements() {
   const snap = await getDocs(query(collection(db, COL.notifications), orderBy("createdAt", "desc")));
   let rows = "";
   snap.forEach(d => { const a = d.data(); rows += `<tr><td>${a.title}</td><td>${a.body}</td></tr>`; });
-  wrap.innerHTML = snap.empty ? "<p>No announcements yet.</p>" : `<table class="data-table"><thead><tr><th>Title</th><th>Message</th></tr></thead><tbody>${rows}</tbody></table>`;
+  wrap.innerHTML = snap.empty ? emptyStateHTML("bullhorn", "No announcements yet.") : `<table class="data-table"><thead><tr><th>Title</th><th>Message</th></tr></thead><tbody>${rows}</tbody></table>`;
 }
 
 /* ============================== FEEDBACK ============================== */
@@ -850,7 +879,7 @@ async function renderFeedback() {
   const snap = await getDocs(collection(db, COL.feedback));
   let rows = "";
   snap.forEach(d => { const f = d.data(); rows += `<tr><td>${f.courseId || "—"}</td><td>${f.rating || "—"}★</td><td>${f.comment || ""}</td></tr>`; });
-  document.getElementById("fb-list").innerHTML = snap.empty ? "<p>No feedback yet.</p>" : `<table class="data-table"><thead><tr><th>Course</th><th>Rating</th><th>Comment</th></tr></thead><tbody>${rows}</tbody></table>`;
+  document.getElementById("fb-list").innerHTML = snap.empty ? emptyStateHTML("comments", "No feedback yet.") : `<table class="data-table"><thead><tr><th>Course</th><th>Rating</th><th>Comment</th></tr></thead><tbody>${rows}</tbody></table>`;
 }
 
 /* ============================== REPORTS / EXPORT ============================== */
@@ -898,5 +927,5 @@ async function renderLogs() {
     const l = d.data();
     rows += `<tr><td>${l.role}</td><td>${l.action}</td><td>${l.details || ""}</td><td>${l.timestamp?.toDate ? l.timestamp.toDate().toLocaleString() : ""}</td></tr>`;
   });
-  document.getElementById("log-list").innerHTML = snap.empty ? "<p>No activity yet.</p>" : `<table class="data-table"><thead><tr><th>Role</th><th>Action</th><th>Details</th><th>When</th></tr></thead><tbody>${rows}</tbody></table>`;
+  document.getElementById("log-list").innerHTML = snap.empty ? emptyStateHTML("clock-rotate-left", "No activity yet.") : `<table class="data-table"><thead><tr><th>Role</th><th>Action</th><th>Details</th><th>When</th></tr></thead><tbody>${rows}</tbody></table>`;
 }

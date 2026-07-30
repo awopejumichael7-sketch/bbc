@@ -6,7 +6,7 @@ import {
   db, COL, ICE_CONFIG, collection, doc, setDoc, getDoc, getDocs, addDoc, deleteDoc, query, where,
   onSnapshot, serverTimestamp, increment, logActivity
 } from "./firebase-config.js";
-import { toast, initTheme, toggleTheme, registerServiceWorker, protectElement, queueOfflineAction, initOfflineWatcher } from "./app-shell.js";
+import { toast, initTheme, toggleTheme, registerServiceWorker, protectElement, queueOfflineAction, initOfflineWatcher, initSessionTimeout, emptyStateHTML, errorStateHTML, loadingStateHTML } from "./app-shell.js";
 import { fetchPublicDriveFile } from "./drive-config.js";
 
 initTheme();
@@ -37,6 +37,7 @@ guardRoute("student").then(async (u) => {
   initOfflineWatcher({
     attendance: async (payload) => { await addDoc(collection(db, COL.attendance), payload); }
   });
+  initSessionTimeout(logout, 25, 5, () => !!studentPc);
 });
 
 function bindSidebar() {
@@ -128,12 +129,12 @@ async function renderLibrary() {
 
   const load = async (type) => {
     const wrap = document.getElementById("lib-list");
-    wrap.innerHTML = "Loading…";
+    wrap.innerHTML = loadingStateHTML();
     const colName = type === "materials" ? "materials" : type;
     let snap;
     try { snap = await getDocs(query(collection(db, colName), where("courseId", "==", course.id))); }
-    catch (e) { wrap.innerHTML = "<p>Could not load — check your connection.</p>"; return; }
-    if (snap.empty) { wrap.innerHTML = "<p>Nothing uploaded here yet.</p>"; return; }
+    catch (e) { wrap.innerHTML = errorStateHTML("Could not load — check your connection.", () => load(type)); return; }
+    if (snap.empty) { wrap.innerHTML = emptyStateHTML("book-open", "Nothing uploaded here yet."); return; }
     wrap.innerHTML = "";
     snap.forEach(d => {
       const item = d.data();
@@ -171,7 +172,7 @@ async function renderMedia() {
     const wrap = document.getElementById("media-list");
     wrap.innerHTML = "Loading…";
     const snap = await getDocs(query(collection(db, COL[type]), where("courseId", "==", course.id)));
-    if (snap.empty) { wrap.innerHTML = "<p>Nothing here yet.</p>"; return; }
+    if (snap.empty) { wrap.innerHTML = emptyStateHTML("photo-film", "Nothing here yet."); return; }
     wrap.innerHTML = "";
     snap.forEach(async (d) => {
       const item = d.data();
@@ -374,7 +375,7 @@ async function renderExams() {
   }
   let rows = "";
   snap.forEach(d => { const r = d.data(); rows += `<tr><td>${r.score}/${r.total}</td><td>${r.percent}%</td><td>${r.grade}</td><td>${r.date || ""}</td></tr>`; });
-  document.getElementById("results-list").innerHTML = snap.empty ? "<p>No results yet.</p>" : `<table class="data-table"><thead><tr><th>Score</th><th>%</th><th>Grade</th><th>Date</th></tr></thead><tbody>${rows}</tbody></table>`;
+  document.getElementById("results-list").innerHTML = snap.empty ? emptyStateHTML("file-pen", "No results yet.") : `<table class="data-table"><thead><tr><th>Score</th><th>%</th><th>Grade</th><th>Date</th></tr></thead><tbody>${rows}</tbody></table>`;
 }
 
 /* ---------- Certificates (across all enrolled courses, no switcher needed) ---------- */
@@ -449,7 +450,7 @@ async function loadMyQuestions() {
   const snap = await getDocs(query(collection(db, COL.questions), where("studentUid", "==", user.uid), where("courseId", "==", course.id)));
   let rows = "";
   snap.forEach(d => { const q = d.data(); rows += `<tr><td>${q.question}</td><td>${q.answer || "Awaiting answer"}</td></tr>`; });
-  document.getElementById("my-q").innerHTML = snap.empty ? "<p>No questions yet.</p>" : `<table class="data-table"><thead><tr><th>Question</th><th>Answer</th></tr></thead><tbody>${rows}</tbody></table>`;
+  document.getElementById("my-q").innerHTML = snap.empty ? emptyStateHTML("comments", "No questions yet.") : `<table class="data-table"><thead><tr><th>Question</th><th>Answer</th></tr></thead><tbody>${rows}</tbody></table>`;
 }
 
 /* ---------- Feedback ---------- */
