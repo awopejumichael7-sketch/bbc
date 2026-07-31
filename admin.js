@@ -5,7 +5,7 @@ import { guardRoute, logout } from "./auth.js";
 import {
   app, auth, db, storage, COL,
   collection, doc, setDoc, getDoc, getDocs, addDoc, updateDoc, deleteDoc,
-  query, where, orderBy, serverTimestamp,
+  query, where, orderBy, onSnapshot, limit, serverTimestamp,
   ref, uploadBytesResumable, getDownloadURL,
   generateId, generatePasscode, logActivity
 } from "./firebase-config.js";
@@ -13,6 +13,8 @@ import { DEFAULT_COURSES, seedCourses } from "./courses-data.js";
 import { toast, initTheme, toggleTheme, registerServiceWorker, initSessionTimeout, emptyStateHTML, errorStateHTML } from "./app-shell.js";
 import { openDrivePicker, makeFilePublic, verifyPublicAccess, driveFileViewUrl, loadGoogleScripts } from "./drive-config.js";
 import { sendWelcomeEmail, sendAnnouncementEmail } from "./email-config.js";
+import { initNotificationBell } from "./notification-center.js";
+import { initOnboardingTour } from "./onboarding-tour.js";
 import { initializeApp, getApps } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { getAuth as getAuthSecondary, createUserWithEmailAndPassword, signOut as signOutSecondary } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 
@@ -30,7 +32,100 @@ guardRoute("admin").then(async (u) => {
   initSessionTimeout(logout);
   bindSidebar();
   renderOverview();
+
+  const bell = initNotificationBell(`cacgw_notif_seen_admin_${u.uid}`);
+  if (bell) {
+    onSnapshot(query(collection(db, COL.activityLogs), orderBy("timestamp", "desc"), limit(20)), (snap) => {
+      const items = [];
+      snap.forEach((d) => {
+        const l = d.data();
+        const ts = l.timestamp?.toMillis ? l.timestamp.toMillis() : Date.now();
+        items.push({ icon: activityIcon(l.action), text: activityText(l), timestamp: ts });
+      });
+      bell.setItems(items);
+    });
+  }
+  initGlobalSearch();
+  initOnboardingTour("admin", u.uid);
 });
+
+/* ---------- Global search — one bar, searches Students, Teachers, Courses,
+   and uploaded Content by name/title. Client-side substring match after a
+   scoped fetch; entirely adequate at a single college's data volume, and
+   avoids needing a paid search service. ---------- */
+function initGlobalSearch() {
+  const spacer = document.querySelector(".brand-bar .spacer");
+  if (!spacer) return;
+  spacer.insertAdjacentHTML("beforebegin", `
+    <div style="position:relative;flex:1;max-width:340px;">
+      <input id="global-search-input" type="text" placeholder="Search students, teachers, courses, content…"
+        style="width:100%;padding:9px 14px 9px 34px;border-radius:999px;border:none;background:rgba(255,255,255,.15);color:#fff;font-size:.85rem;">
+      <i class="fa-solid fa-magnifying-glass" style="position:absolute;left:13px;top:50%;transform:translateY(-50%);color:rgba(255,255,255,.7);font-size:.8rem;"></i>
+    </div>`);
+  const input = document.getElementById("global-search-input");
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && input.value.trim().length >= 2) {
+      document.querySelectorAll(".sidebar a").forEach((x) => x.classList.remove("active"));
+      renderSearchResults(input.value.trim());
+    }
+  });
+}
+
+async function renderSearchResults(term) {
+  main.innerHTML = `<h2><i class="fa-solid fa-magnifying-glass"></i> Search results for "${term}"</h2><div class="skeleton" style="height:220px;"></div>`;
+  const t = term.toLowerCase();
+  const contentCols = ["ebooks", "handbooks", "syllabus", "materials", "audio", "videos"];
+
+  const [teachersSnap, studentsSnap, coursesSnap, ...contentSnaps] = await Promise.all([
+    getDocs(collection(db, COL.teachers)), getDocs(collection(db, COL.students)), getDocs(collection(db, COL.courses)),
+    ...contentCols.map((c) => getDocs(collection(db, c)))
+  ]);
+
+  const teacherMatches = [];
+  teachersSnap.forEach((d) => { const x = d.data(); if ((x.fullName || "").toLowerCase().includes(t) || (x.teacherId || "").toLowerCase().includes(t)) teacherMatches.push(x); });
+
+  const studentMatches = [];
+  studentsSnap.forEach((d) => { const x = d.data(); if ((x.fullName || "").toLowerCase().includes(t) || (x.studentId || "").toLowerCase().includes(t)) studentMatches.push(x); });
+
+  const courseMatches = [];
+  coursesSnap.forEach((d) => { const x = d.data(); if ((x.title || "").toLowerCase().includes(t) || (x.code || "").toLowerCase().includes(t)) courseMatches.push(x); });
+
+  const contentMatches = [];
+  contentSnaps.forEach((snap, i) => snap.forEach((d) => {
+    const x = d.data();
+    if ((x.title || "").toLowerCase().includes(t)) contentMatches.push({ ...x, type: contentCols[i] });
+  }));
+
+  const totalResults = teacherMatches.length + studentMatches.length + courseMatches.length + contentMatches.length;
+
+  function section(title, icon, rows) {
+    if (!rows.length) return "";
+    return `<div class="glass-card" style="margin-bottom:16px;">
+        <h4><i class="fa-solid fa-${icon}"></i> ${title} (${rows.length})</h4>
+        <table class="data-table"><tbody>${rows.join("")}</tbody></table>
+      </div>`;
+  }
+
+  main.innerHTML = `<h2><i class="fa-solid fa-magnifying-glass"></i> Search results for "${term}"</h2>` +
+    (totalResults === 0
+      ? emptyStateHTML("magnifying-glass", `No matches for "${term}" across students, teachers, courses, or content.`)
+      : section("Teachers", "chalkboard-user", teacherMatches.map((x) => `<tr><td>${x.fullName}</td><td>${x.teacherId}</td><td>${x.email || ""}</td></tr>`)) +
+        section("Students", "user-graduate", studentMatches.map((x) => `<tr><td>${x.fullName}</td><td>${x.studentId}</td><td>${x.email || ""}</td></tr>`)) +
+        section("Courses", "book-bible", courseMatches.map((x) => `<tr><td>${x.code}</td><td>${x.title}</td></tr>`)) +
+        section("Content", "file", contentMatches.map((x) => `<tr><td>${x.title}</td><td>${x.type}</td></tr>`)));
+}
+
+function activityIcon(action) {
+  if (action.includes("create_teacher") || action.includes("create_student")) return "user-plus";
+  if (action.includes("upload") || action.includes("link_drive")) return "cloud-arrow-up";
+  if (action.includes("grade")) return "marker";
+  if (action.includes("delete")) return "trash";
+  return "circle-info";
+}
+function activityText(l) {
+  const roleLabel = l.role.charAt(0).toUpperCase() + l.role.slice(1);
+  return `${roleLabel} — ${l.action.replace(/_/g, " ")}${l.details ? `: ${l.details}` : ""}`;
+}
 
 function bindSidebar() {
   document.querySelectorAll(".sidebar a").forEach(a => {
@@ -59,8 +154,8 @@ function secondaryAuth() {
 /* ============================== OVERVIEW ============================== */
 async function renderOverview() {
   main.innerHTML = `<div class="skeleton" style="height:220px;"></div>`;
-  const [teachers, students, courses, attendance, feedback] = await Promise.all(
-    [COL.teachers, COL.students, COL.courses, COL.attendance, COL.feedback].map(c => getDocs(collection(db, c)))
+  const [teachers, students, courses, attendance, feedback, results] = await Promise.all(
+    [COL.teachers, COL.students, COL.courses, COL.attendance, COL.feedback, COL.results].map(c => getDocs(collection(db, c)))
   );
   main.innerHTML = `
     <h2>Welcome back, Administrator</h2>
@@ -77,10 +172,88 @@ async function renderOverview() {
       <button class="btn-navy" id="qa-teacher"><i class="fa-solid fa-plus"></i> New Teacher</button>
       <button class="btn-navy" id="qa-student"><i class="fa-solid fa-plus"></i> New Student</button>
       <button class="btn-gold" id="qa-announce"><i class="fa-solid fa-bullhorn"></i> New Announcement</button>
+    </div>
+
+    <h4 style="margin-top:24px;"><i class="fa-solid fa-chart-column"></i> Analytics</h4>
+    <div class="stat-grid" style="grid-template-columns:repeat(auto-fit,minmax(280px,1fr));">
+      <div class="glass-card"><p style="font-weight:600;color:var(--muted);margin-bottom:8px;">Enrollment by Course</p><canvas id="chart-enrollment" height="220"></canvas></div>
+      <div class="glass-card"><p style="font-weight:600;color:var(--muted);margin-bottom:8px;">Attendance — Last 14 Days</p><canvas id="chart-attendance" height="220"></canvas></div>
+      <div class="glass-card"><p style="font-weight:600;color:var(--muted);margin-bottom:8px;">Grade Distribution</p><canvas id="chart-grades" height="220"></canvas></div>
     </div>`;
   document.getElementById("qa-teacher").onclick = () => document.querySelector('[data-view="teachers"]').click();
   document.getElementById("qa-student").onclick = () => document.querySelector('[data-view="students"]').click();
   document.getElementById("qa-announce").onclick = () => document.querySelector('[data-view="announcements"]').click();
+
+  renderOverviewCharts(students, courses, attendance, results).catch((err) => console.warn("Charts failed to load:", err));
+}
+
+/* ---------- Overview analytics — Chart.js is self-hosted (chart.umd.js in this
+   same folder, no CDN) and loaded lazily, only when the Overview page renders ---------- */
+let chartJsLoadPromise = null;
+function loadChartJs() {
+  if (window.Chart) return Promise.resolve(window.Chart);
+  if (chartJsLoadPromise) return chartJsLoadPromise;
+  chartJsLoadPromise = new Promise((resolve, reject) => {
+    const script = document.createElement("script");
+    script.src = "./chart.umd.js";
+    script.onload = () => window.Chart ? resolve(window.Chart) : reject(new Error("Chart library failed to initialize."));
+    script.onerror = () => reject(new Error("Could not load the chart library."));
+    document.head.appendChild(script);
+  });
+  return chartJsLoadPromise;
+}
+
+let overviewCharts = []; // track instances so re-rendering Overview doesn't leak/duplicate canvases
+
+async function renderOverviewCharts(studentsSnap, coursesSnap, attendanceSnap, resultsSnap) {
+  const Chart = await loadChartJs();
+  overviewCharts.forEach((c) => c.destroy());
+  overviewCharts = [];
+
+  const NAVY = "#0b2545", GOLD = "#d4af37";
+
+  // --- Enrollment by course (reuses students/courses already fetched — no extra reads) ---
+  const courseList = coursesSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  const enrollCounts = courseList.map((c) => {
+    let n = 0;
+    studentsSnap.forEach((d) => {
+      const s = d.data();
+      const ids = s.courseIds || (s.courseId ? [s.courseId] : []);
+      if (ids.includes(c.id)) n++;
+    });
+    return n;
+  });
+  overviewCharts.push(new Chart(document.getElementById("chart-enrollment"), {
+    type: "bar",
+    data: { labels: courseList.map((c) => c.code), datasets: [{ label: "Students", data: enrollCounts, backgroundColor: NAVY, borderRadius: 4 }] },
+    options: { plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, ticks: { precision: 0 } } } }
+  }));
+
+  // --- Attendance over the last 14 days ---
+  const days = [];
+  for (let i = 13; i >= 0; i--) {
+    const d = new Date(); d.setDate(d.getDate() - i);
+    days.push(d.toISOString().slice(0, 10));
+  }
+  const attByDay = Object.fromEntries(days.map((d) => [d, 0]));
+  attendanceSnap.forEach((d) => { const a = d.data(); if (a.date && attByDay[a.date] !== undefined) attByDay[a.date]++; });
+  overviewCharts.push(new Chart(document.getElementById("chart-attendance"), {
+    type: "line",
+    data: { labels: days.map((d) => d.slice(5)), datasets: [{ label: "Check-ins", data: days.map((d) => attByDay[d]), borderColor: GOLD, backgroundColor: "rgba(212,175,55,.2)", fill: true, tension: 0.3 }] },
+    options: { plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, ticks: { precision: 0 } } } }
+  }));
+
+  // --- Grade distribution across all graded results ---
+  const gradeCounts = { A: 0, B: 0, C: 0, D: 0, F: 0 };
+  resultsSnap.forEach((d) => { const r = d.data(); if (r.grade && gradeCounts[r.grade] !== undefined && !r.needsManualGrading) gradeCounts[r.grade]++; });
+  overviewCharts.push(new Chart(document.getElementById("chart-grades"), {
+    type: "doughnut",
+    data: {
+      labels: Object.keys(gradeCounts),
+      datasets: [{ data: Object.values(gradeCounts), backgroundColor: ["#1e8e5a", "#0f766e", "#d4af37", "#b45309", "#c0392b"] }]
+    },
+    options: { plugins: { legend: { position: "bottom" } } }
+  }));
 }
 
 /* ---------- Persistent credentials modal (doesn't auto-dismiss like a toast) ---------- */
@@ -890,10 +1063,12 @@ async function renderReports() {
       <p>Export full platform data for offline record keeping.</p>
       <button class="btn-navy" id="exp-csv"><i class="fa-solid fa-file-csv"></i> Export Students (CSV / Excel)</button>
       <button class="btn-gold" id="exp-pdf"><i class="fa-solid fa-file-pdf"></i> Export Summary (PDF)</button>
-    </div>`;
+    </div>
+    <p style="color:var(--muted);margin-top:16px;"><i class="fa-solid fa-circle-info"></i> Live charts (enrollment, attendance, grade distribution) are on the Overview tab.</p>`;
   document.getElementById("exp-csv").onclick = exportStudentsCSV;
   document.getElementById("exp-pdf").onclick = exportSummaryPDF;
 }
+
 async function exportStudentsCSV() {
   const snap = await getDocs(collection(db, COL.students));
   let csv = "Student ID,Full Name,Email,Course,Status\n";

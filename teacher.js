@@ -10,6 +10,8 @@ import {
 import { toast, initTheme, toggleTheme, registerServiceWorker, initSessionTimeout, emptyStateHTML, errorStateHTML } from "./app-shell.js";
 import { openDrivePicker, makeFilePublic, verifyPublicAccess, driveFileViewUrl, uploadFileToDrive, loadGoogleScripts } from "./drive-config.js";
 import { sendResultEmail } from "./email-config.js";
+import { initNotificationBell } from "./notification-center.js";
+import { initOnboardingTour } from "./onboarding-tour.js";
 
 initTheme();
 registerServiceWorker();
@@ -36,7 +38,46 @@ guardRoute("teacher").then(async (u) => {
   bindSidebar();
   renderOverview();
   initSessionTimeout(logout, 25, 5, () => !!liveStream || !!mediaRecorder || !!isLiveRecording);
+  setupTeacherNotifications(u.uid);
+  initOnboardingTour("teacher", u.uid);
 });
+
+/* ---------- Real-time notification bell: new student questions and new
+   theory answers needing grading, merged across every assigned course ---------- */
+function setupTeacherNotifications(uid) {
+  const bell = initNotificationBell(`cacgw_notif_seen_teacher_${uid}`);
+  if (!bell || !myCourses.length) return;
+
+  const feedByCourse = {}; // courseId -> array of items from that course's listeners
+  function pushAndRender(courseId, key, items) {
+    feedByCourse[courseId] = feedByCourse[courseId] || {};
+    feedByCourse[courseId][key] = items;
+    const merged = Object.values(feedByCourse).flatMap(c => [...(c.questions || []), ...(c.grading || [])]);
+    merged.sort((a, b) => b.timestamp - a.timestamp);
+    bell.setItems(merged);
+  }
+
+  myCourses.forEach((c) => {
+    onSnapshot(query(collection(db, COL.questions), where("courseId", "==", c.id)), (snap) => {
+      const items = [];
+      snap.forEach((d) => {
+        const q = d.data();
+        const ts = q.createdAt?.toMillis ? q.createdAt.toMillis() : Date.now();
+        items.push({ icon: "comments", text: `New question in ${c.code}: "${(q.question || "").slice(0, 60)}"`, timestamp: ts });
+      });
+      pushAndRender(c.id, "questions", items);
+    });
+    onSnapshot(query(collection(db, COL.results), where("courseId", "==", c.id), where("needsManualGrading", "==", true)), (snap) => {
+      const items = [];
+      snap.forEach((d) => {
+        const r = d.data();
+        const ts = r.createdAt?.toMillis ? r.createdAt.toMillis() : Date.now();
+        items.push({ icon: "marker", text: `${r.studentId} submitted a theory exam for ${c.code} — needs grading`, timestamp: ts });
+      });
+      pushAndRender(c.id, "grading", items);
+    });
+  });
+}
 
 function bindSidebar() {
   document.querySelectorAll(".sidebar a").forEach(a => {

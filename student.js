@@ -4,10 +4,12 @@
 import { guardRoute, logout } from "./auth.js";
 import {
   db, COL, ICE_CONFIG, collection, doc, setDoc, getDoc, getDocs, addDoc, deleteDoc, query, where,
-  onSnapshot, serverTimestamp, increment, logActivity
+  onSnapshot, orderBy, limit, serverTimestamp, increment, logActivity
 } from "./firebase-config.js";
 import { toast, initTheme, toggleTheme, registerServiceWorker, protectElement, queueOfflineAction, initOfflineWatcher, initSessionTimeout, emptyStateHTML, errorStateHTML, loadingStateHTML } from "./app-shell.js";
 import { fetchPublicDriveFile } from "./drive-config.js";
+import { initNotificationBell } from "./notification-center.js";
+import { initOnboardingTour } from "./onboarding-tour.js";
 
 initTheme();
 registerServiceWorker();
@@ -38,7 +40,57 @@ guardRoute("student").then(async (u) => {
     attendance: async (payload) => { await addDoc(collection(db, COL.attendance), payload); }
   });
   initSessionTimeout(logout, 25, 5, () => !!studentPc);
+  setupStudentNotifications(u.uid);
+  initOnboardingTour("student", u.uid);
 });
+
+/* ---------- Real-time notification bell: announcements, answered questions,
+   and graded exam results ---------- */
+function setupStudentNotifications(uid) {
+  const bell = initNotificationBell(`cacgw_notif_seen_student_${uid}`);
+  if (!bell) return;
+
+  const feed = { announcements: [], questions: [], results: [] };
+  function render() {
+    const merged = [...feed.announcements, ...feed.questions, ...feed.results];
+    merged.sort((a, b) => b.timestamp - a.timestamp);
+    bell.setItems(merged);
+  }
+
+  onSnapshot(query(collection(db, COL.notifications), orderBy("createdAt", "desc"), limit(10)), (snap) => {
+    const items = [];
+    snap.forEach((d) => {
+      const a = d.data();
+      const ts = a.createdAt?.toMillis ? a.createdAt.toMillis() : Date.now();
+      items.push({ icon: "bullhorn", text: `Announcement: ${a.title}`, timestamp: ts });
+    });
+    feed.announcements = items;
+    render();
+  });
+
+  onSnapshot(query(collection(db, COL.questions), where("studentUid", "==", uid)), (snap) => {
+    const items = [];
+    snap.forEach((d) => {
+      const q = d.data();
+      if (!q.answer) return; // only notify once a teacher has actually answered
+      const ts = q.answeredAt?.toMillis ? q.answeredAt.toMillis() : Date.now();
+      items.push({ icon: "comments", text: `Your question was answered: "${(q.question || "").slice(0, 50)}"`, timestamp: ts });
+    });
+    feed.questions = items;
+    render();
+  });
+
+  onSnapshot(query(collection(db, COL.results), where("studentUid", "==", uid), where("needsManualGrading", "==", false)), (snap) => {
+    const items = [];
+    snap.forEach((d) => {
+      const r = d.data();
+      const ts = r.gradedAt?.toMillis ? r.gradedAt.toMillis() : (r.createdAt?.toMillis ? r.createdAt.toMillis() : Date.now());
+      items.push({ icon: "file-pen", text: `Result ready for ${r.courseTitle || r.courseId}: ${r.percent}% (${r.grade})`, timestamp: ts });
+    });
+    feed.results = items;
+    render();
+  });
+}
 
 function bindSidebar() {
   document.querySelectorAll(".sidebar a").forEach(a => {
