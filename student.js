@@ -106,7 +106,7 @@ function bindSidebar() {
 function views() {
   return {
     overview: renderOverview, library: renderLibrary, media: renderMedia, live: renderLive,
-    exams: renderExams, certificates: renderCertificates,
+    exams: renderExams, certificates: renderCertificates, idcard: renderIdCard, transcript: renderTranscript,
     questions: renderQuestions, feedback: renderFeedback
   };
 }
@@ -474,6 +474,166 @@ async function generateCertificate(result) {
   pdf.save(`Certificate-${profile.studentId}.pdf`);
   await logActivity(user.uid, "student", "download_certificate", verifyCode);
   toast("Certificate downloaded", "success");
+}
+
+/* ---------- Digital Student ID Card ---------- */
+let qrLoadPromise = null;
+function loadQRCodeLib() {
+  if (window.QRCode) return Promise.resolve(window.QRCode);
+  if (qrLoadPromise) return qrLoadPromise;
+  qrLoadPromise = new Promise((resolve, reject) => {
+    const script = document.createElement("script");
+    script.src = "./qrcode.min.js";
+    script.onload = () => window.QRCode ? resolve(window.QRCode) : reject(new Error("QR code library did not initialize."));
+    script.onerror = () => reject(new Error("Could not load the QR code library."));
+    document.head.appendChild(script);
+  });
+  return qrLoadPromise;
+}
+
+async function renderIdCard() {
+  currentView = "idcard";
+  main.innerHTML = `
+    <h2><i class="fa-solid fa-id-card"></i> Digital ID Card</h2>
+    <div class="glass-card" style="max-width:460px;">
+      <p style="color:var(--muted);">Your student ID card, generated on demand — always up to date with your current enrollment.</p>
+      <button class="btn-gold" id="download-id-btn"><i class="fa-solid fa-download"></i> Download My ID Card</button>
+      <p id="id-card-status" style="margin-top:10px;color:var(--muted);"></p>
+      <p style="color:var(--muted);font-size:.8rem;margin-top:10px;">
+        <i class="fa-solid fa-circle-info"></i> The QR code on your card holds your name, ID, and course details for quick reference when scanned — it isn't a live online lookup, since that would need a server component this free build doesn't use.
+      </p>
+    </div>`;
+  document.getElementById("download-id-btn").onclick = generateIdCard;
+}
+
+async function generateIdCard() {
+  const statusEl = document.getElementById("id-card-status");
+  statusEl.textContent = "Generating…";
+  try {
+    const [{ jsPDF }, QRCode] = await Promise.all([
+      import("https://cdn.jsdelivr.net/npm/jspdf@2.5.1/+esm"),
+      loadQRCodeLib()
+    ]);
+
+    const courseLabel = myCourses.length
+      ? (myCourses.length === 1 ? myCourses[0].code : `${myCourses.length} courses enrolled`)
+      : "Not currently enrolled";
+    const qrPayload = `CAC Good Works Assembly Believers Bible College\nName: ${profile.fullName}\nStudent ID: ${profile.studentId}\nCourses: ${myCourses.map(c => c.code).join(", ") || "None"}`;
+    const qrDataUrl = await QRCode.toDataURL(qrPayload, { margin: 1, width: 200, color: { dark: "#0b2545", light: "#ffffff" } });
+
+    // CR80 standard ID card size: 85.6mm x 54mm
+    const pdf = new jsPDF({ orientation: "landscape", unit: "mm", format: [85.6, 54] });
+    pdf.setFillColor(11, 37, 69); pdf.rect(0, 0, 85.6, 54, "F");
+    pdf.setDrawColor(212, 175, 55); pdf.setLineWidth(0.6); pdf.rect(1.5, 1.5, 82.6, 51, "S");
+
+    pdf.setTextColor(212, 175, 55);
+    pdf.setFont("helvetica", "bold"); pdf.setFontSize(6.5);
+    pdf.text("CAC GOOD WORKS ASSEMBLY", 4, 6);
+    pdf.text("BELIEVERS BIBLE COLLEGE", 4, 9.5);
+
+    // Initials avatar circle (no photo upload system exists, so a clean initials badge stands in)
+    const initials = (profile.fullName || "?").trim().split(/\s+/).map(w => w[0]).slice(0, 2).join("").toUpperCase();
+    pdf.setFillColor(212, 175, 55);
+    pdf.circle(13, 24, 8, "F");
+    pdf.setTextColor(11, 37, 69);
+    pdf.setFont("helvetica", "bold"); pdf.setFontSize(12);
+    pdf.text(initials, 13, 26.5, { align: "center" });
+
+    pdf.setTextColor(255, 255, 255);
+    pdf.setFont("helvetica", "bold"); pdf.setFontSize(9);
+    pdf.text(profile.fullName || "", 26, 20);
+    pdf.setFont("helvetica", "normal"); pdf.setFontSize(7);
+    pdf.text(`ID: ${profile.studentId}`, 26, 25);
+    pdf.text(`Course: ${courseLabel}`, 26, 29.5, { maxWidth: 34 });
+    pdf.setFontSize(6); pdf.setTextColor(212, 175, 55);
+    pdf.text(`Issued: ${new Date().toLocaleDateString()}`, 26, 48);
+
+    pdf.addImage(qrDataUrl, "PNG", 65, 30, 18, 18);
+
+    pdf.save(`ID-Card-${profile.studentId}.pdf`);
+    await logActivity(user.uid, "student", "download_id_card", profile.studentId);
+    statusEl.textContent = "Downloaded!";
+    toast("ID card downloaded", "success");
+  } catch (err) {
+    statusEl.textContent = "Could not generate ID card.";
+    toast(err.message, "error");
+  }
+}
+
+/* ---------- Academic Transcript (all courses, not just one) ---------- */
+async function renderTranscript() {
+  currentView = "transcript";
+  main.innerHTML = `
+    <h2><i class="fa-solid fa-scroll"></i> Academic Transcript</h2>
+    <div class="glass-card">
+      <p style="color:var(--muted);">A single document listing every course you've taken, your grades, and your overall average.</p>
+      <button class="btn-gold" id="download-transcript-btn"><i class="fa-solid fa-download"></i> Download Transcript (PDF)</button>
+      <p id="transcript-status" style="margin-top:10px;color:var(--muted);"></p>
+    </div>`;
+  document.getElementById("download-transcript-btn").onclick = generateTranscript;
+}
+
+async function generateTranscript() {
+  const statusEl = document.getElementById("transcript-status");
+  statusEl.textContent = "Gathering your records…";
+  try {
+    const snap = await getDocs(query(collection(db, COL.results), where("studentUid", "==", user.uid)));
+    const rows = []; snap.forEach(d => rows.push(d.data()));
+    if (!rows.length) { statusEl.textContent = "No exam records yet — nothing to include in a transcript."; return; }
+
+    const completed = rows.filter(r => !r.needsManualGrading);
+    const pending = rows.filter(r => r.needsManualGrading);
+    const average = completed.length ? Math.round(completed.reduce((sum, r) => sum + r.percent, 0) / completed.length) : 0;
+
+    const { jsPDF } = await import("https://cdn.jsdelivr.net/npm/jspdf@2.5.1/+esm");
+    const pdf = new jsPDF({ orientation: "portrait" });
+
+    pdf.setFillColor(11, 37, 69); pdf.rect(0, 0, 210, 32, "F");
+    pdf.setTextColor(255, 255, 255); pdf.setFont("times", "bold"); pdf.setFontSize(16);
+    pdf.text("CAC Good Works Assembly Believers Bible College", 105, 14, { align: "center" });
+    pdf.setFontSize(12); pdf.setFont("times", "normal");
+    pdf.text("Official Academic Transcript", 105, 23, { align: "center" });
+
+    pdf.setTextColor(20, 20, 20); pdf.setFontSize(11);
+    pdf.text(`Name: ${profile.fullName}`, 14, 42);
+    pdf.text(`Student ID: ${profile.studentId}`, 14, 49);
+    pdf.text(`Generated: ${new Date().toLocaleDateString()}`, 14, 56);
+
+    let y = 70;
+    pdf.setFont("times", "bold"); pdf.setFontSize(10);
+    pdf.text("Course", 14, y); pdf.text("Score", 110, y); pdf.text("Grade", 140, y); pdf.text("Status", 165, y);
+    pdf.setDrawColor(212, 175, 55); pdf.line(14, y + 2, 196, y + 2);
+    pdf.setFont("times", "normal");
+    y += 9;
+
+    rows.forEach(r => {
+      if (y > 270) { pdf.addPage(); y = 20; }
+      const title = (r.courseTitle || r.courseId || "").slice(0, 42);
+      pdf.text(title, 14, y);
+      pdf.text(r.needsManualGrading ? "—" : `${r.score}/${r.total} (${r.percent}%)`, 110, y);
+      pdf.text(r.needsManualGrading ? "—" : r.grade, 140, y);
+      pdf.text(r.needsManualGrading ? "In Progress" : "Complete", 165, y);
+      y += 8;
+    });
+
+    y += 6;
+    pdf.setDrawColor(11, 37, 69); pdf.line(14, y, 196, y);
+    y += 10;
+    pdf.setFont("times", "bold"); pdf.setFontSize(12);
+    pdf.text(`Overall Average (completed courses): ${average}%`, 14, y);
+    if (pending.length) {
+      y += 8; pdf.setFont("times", "italic"); pdf.setFontSize(9); pdf.setTextColor(100, 100, 100);
+      pdf.text(`${pending.length} course(s) awaiting final grading are not included in this average.`, 14, y);
+    }
+
+    pdf.save(`Transcript-${profile.studentId}.pdf`);
+    await logActivity(user.uid, "student", "download_transcript", profile.studentId);
+    statusEl.textContent = "Downloaded!";
+    toast("Transcript downloaded", "success");
+  } catch (err) {
+    statusEl.textContent = "Could not generate transcript.";
+    toast(err.message, "error");
+  }
 }
 
 /* ---------- Ask a Question ---------- */

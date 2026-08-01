@@ -23,6 +23,11 @@
     <h2 style="color:#0b2545;">CAC Good Works Assembly</h2>
     <p style="color:#66738a;margin-top:-6px;">Believers Bible College</p>
 
+    <div id="verse-of-the-day" style="background:linear-gradient(120deg,#f1d98b33,#d4af3722);border:1px solid #d4af3755;border-radius:12px;padding:10px 14px;margin:14px 0;text-align:left;">
+      <p id="verse-text" style="font-style:italic;color:#0b2545;font-size:.85rem;margin:0;line-height:1.5;"></p>
+      <p id="verse-ref" style="color:#8a6d1f;font-size:.75rem;font-weight:600;margin:4px 0 0;text-align:right;"></p>
+    </div>
+
     <div class="role-tabs">
       <button type="button" class="active" data-role="student"><i class="fa-solid fa-user-graduate"></i> Student</button>
       <button type="button" data-role="teacher"><i class="fa-solid fa-chalkboard-user"></i> Teacher</button>
@@ -65,11 +70,16 @@
 <script type="module">
   import { setLoginRole, handleLogin } from "./auth.js";
   import { initInstallBanner, registerServiceWorker, initTheme } from "./app-shell.js";
+  import { getVerseOfTheDay } from "./verses.js";
 
   document.getElementById("year").textContent = new Date().getFullYear();
   initTheme();
   registerServiceWorker();
   initInstallBanner();
+
+  const verse = getVerseOfTheDay();
+  document.getElementById("verse-text").textContent = `"${verse.text}"`;
+  document.getElementById("verse-ref").textContent = `— ${verse.ref}`;
 
   const roleBtns = document.querySelectorAll(".role-tabs button");
   const idLabel = document.getElementById("id-label");

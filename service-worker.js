@@ -4,7 +4,7 @@
    this worker only caches the static shell (HTML/CSS/JS/icons) so the app
    opens and navigates even with zero connectivity.
    ========================================================================== */
-const CACHE_NAME = "cacgw-bible-college-v19";
+const CACHE_NAME = "cacgw-bible-college-v20";
 const APP_SHELL = [
   "./index.html",
   "./admin.html",
@@ -26,7 +26,9 @@ const APP_SHELL = [
   "./driver.js",
   "./driver.css",
   "./chart.umd.js",
+  "./qrcode.min.js",
   "./courses-data.js",
+  "./verses.js",
   "./auth.js",
   "./admin.js",
   "./teacher.js",

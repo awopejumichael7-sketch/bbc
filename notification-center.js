@@ -20,7 +20,7 @@ export function initNotificationBell(storageKey) {
 
   spacer.insertAdjacentHTML("afterend", `
     <div style="position:relative;">
-      <button class="icon-btn" id="notif-bell-btn" title="Notifications">
+      <button class="icon-btn" id="notif-bell-btn" title="Notifications" aria-label="Notifications">
         <i class="fa-solid fa-bell"></i>
         <span id="notif-badge" style="display:none;position:absolute;top:-2px;right:-2px;background:var(--danger);color:#fff;border-radius:999px;font-size:.65rem;padding:1px 5px;font-weight:700;"></span>
       </button>

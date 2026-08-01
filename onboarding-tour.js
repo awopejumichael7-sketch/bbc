@@ -84,7 +84,7 @@ export function initOnboardingTour(role, uid) {
   // Always leave a manual "Take a tour" trigger available to replay it later
   const spacer = document.querySelector(".brand-bar .spacer");
   if (spacer) {
-    spacer.insertAdjacentHTML("afterend", `<button class="icon-btn" id="tour-replay-btn" title="Take a tour"><i class="fa-solid fa-circle-question"></i></button>`);
+    spacer.insertAdjacentHTML("afterend", `<button class="icon-btn" id="tour-replay-btn" title="Take a tour" aria-label="Take a guided tour"><i class="fa-solid fa-circle-question"></i></button>`);
     document.getElementById("tour-replay-btn").onclick = runTour;
   }
 }
