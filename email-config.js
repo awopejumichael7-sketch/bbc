@@ -23,9 +23,9 @@
    ========================================================================== */
 
 // ---- REPLACE WITH YOUR OWN EMAILJS CREDENTIALS ------------------------
-export const EMAILJS_PUBLIC_KEY = "RTPaCdCRNw91ntczK";
-export const EMAILJS_SERVICE_ID = "service_cd7m9pa";
-export const EMAILJS_TEMPLATE_ID = "template_z2q41ac";
+export const EMAILJS_PUBLIC_KEY = "YOUR_EMAILJS_PUBLIC_KEY";
+export const EMAILJS_SERVICE_ID = "YOUR_EMAILJS_SERVICE_ID";
+export const EMAILJS_TEMPLATE_ID = "YOUR_EMAILJS_TEMPLATE_ID";
 // -----------------------------------------------------------------------
 
 let sdkLoadPromise = null;
@@ -77,7 +77,15 @@ export function sendWelcomeEmail(toEmail, toName, role, loginId, passcode) {
   return sendNotificationEmail({
     toEmail, toName,
     subject: `Welcome to CAC Good Works Assembly Believers Bible College`,
-    message: `Your ${role} account has been created.\n\nLogin ID: ${loginId}\n\n \n\nPasscode: ${passcode}\n\nFor security, your passcode was shown only once on screen to whoever created your account — please collect it from the College Administrator if you don't already have it.\n\nYou can sign in at the college portal using your Login ID and passcode.`
+    message: `Your ${role} account has been created.\n\nLogin ID: ${loginId}\nPasscode: ${passcode}\n\nPlease keep these details private and do not share them with anyone. You can sign in at the college portal using your Login ID and passcode.`
+  });
+}
+
+export function sendResetCredentialsEmail(toEmail, toName, role, loginId, passcode) {
+  return sendNotificationEmail({
+    toEmail, toName,
+    subject: `Your login details have been reset`,
+    message: `Your ${role} account login was reset by the College Administrator. Your previous ID and passcode no longer work.\n\nNew Login ID: ${loginId}\nNew Passcode: ${passcode}\n\nPlease keep these details private and do not share them with anyone. If you did not request this change, contact the College Administrator right away.`
   });
 }
 

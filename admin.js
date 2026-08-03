@@ -12,7 +12,7 @@ import {
 import { DEFAULT_COURSES, seedCourses } from "./courses-data.js";
 import { toast, initTheme, toggleTheme, registerServiceWorker, initSessionTimeout, emptyStateHTML, errorStateHTML } from "./app-shell.js";
 import { openDrivePicker, makeFilePublic, verifyPublicAccess, driveFileViewUrl, loadGoogleScripts } from "./drive-config.js";
-import { sendWelcomeEmail, sendAnnouncementEmail } from "./email-config.js";
+import { sendWelcomeEmail, sendResetCredentialsEmail, sendAnnouncementEmail } from "./email-config.js";
 import { initNotificationBell } from "./notification-center.js";
 import { initOnboardingTour } from "./onboarding-tour.js";
 import { initializeApp, getApps } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
@@ -266,7 +266,7 @@ function showCredentialsModal(role, name, id, passcode) {
   backdrop.innerHTML = `
     <div class="glass-card" style="max-width:440px;width:100%;background:#fff;">
       <h4><i class="fa-solid fa-circle-check" style="color:var(--success);"></i> ${role} Created</h4>
-      <p style="color:var(--muted);">Save or share these login details with <strong>${name}</strong> now — this passcode cannot be shown again after you close this box.</p>
+      <p style="color:var(--muted);">Save or share these login details with <strong>${name}</strong> now. If email notifications are set up, a copy has also just been sent to their email — otherwise, this passcode cannot be shown again after you close this box.</p>
       <div class="form-field"><label>Login ID</label><input readonly value="${id}" id="cred-id"></div>
       <div class="form-field"><label>Passcode</label><input readonly value="${passcode}" id="cred-pass"></div>
       <button class="btn-gold" id="cred-copy"><i class="fa-solid fa-copy"></i> Copy Both</button>
@@ -313,6 +313,7 @@ async function resetCredentials(role, oldDocId, refreshFn) {
     await signOutSecondary(sAuth);
     await logActivity(user.uid, "admin", "reset_" + role, `${oldData[idField]} -> ${newId}`);
     showCredentialsModal(role === "teacher" ? "Teacher" : "Student", oldData.fullName, newId, newPasscode);
+    sendResetCredentialsEmail(oldData.email, oldData.fullName, role, newId, newPasscode).catch(() => {}); // best-effort; never blocks the reset itself
     if (refreshFn) refreshFn();
   } catch (err) {
     console.error(err);
@@ -375,7 +376,7 @@ async function renderTeachers() {
       await signOutSecondary(sAuth);
       await logActivity(user.uid, "admin", "create_teacher", teacherId);
       showCredentialsModal("Teacher", name, teacherId, passcode);
-      sendWelcomeEmail(email, name, "teacher", teacherId).catch(() => {}); // best-effort; never blocks account creation
+      sendWelcomeEmail(email, name, "teacher", teacherId, passcode).catch(() => {}); // best-effort; never blocks account creation
       e.target.reset();
       loadTeacherTable();
     } catch (err) { console.error(err); toast(err.message, "error"); }
@@ -473,7 +474,7 @@ async function renderStudents() {
       await signOutSecondary(sAuth);
       await logActivity(user.uid, "admin", "create_student", studentId);
       showCredentialsModal("Student", name, studentId, passcode);
-      sendWelcomeEmail(email, name, "student", studentId).catch(() => {}); // best-effort; never blocks account creation
+      sendWelcomeEmail(email, name, "student", studentId, passcode).catch(() => {}); // best-effort; never blocks account creation
       e.target.reset();
       loadStudentTable();
     } catch (err) { console.error(err); toast(err.message, "error"); }
